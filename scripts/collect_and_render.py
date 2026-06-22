@@ -149,6 +149,15 @@ def main():
 
         if is_command(text):
             command_requested = True
+            # после команды в том же сообщении могут быть указаны имена и время
+            # (например: "/окошки Оля 12:00, 15:00") — разбираем и их
+            remainder = text.strip()
+            for prefix in COMMAND_PREFIXES:
+                if remainder.lower().startswith(prefix):
+                    remainder = remainder[len(prefix):].strip()
+                    break
+            for key, slots in parse_message(remainder):
+                coll_state["data"][key] = slots
             continue
 
         matches = parse_message(text)
