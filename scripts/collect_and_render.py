@@ -90,10 +90,9 @@ def main():
         if not text:
             continue
         for key, slots in parse_message(text):
-            collected.setdefault(key, [])
-            for s in slots:
-                if s not in collected[key]:
-                    collected[key].append(s)
+            # последнее сообщение от мастера полностью заменяет предыдущее —
+            # так исправления ("нет, на самом деле...") учитываются корректно
+            collected[key] = slots
 
     save_json(OFFSET_PATH, {"offset": max_update_id + 1})
 
