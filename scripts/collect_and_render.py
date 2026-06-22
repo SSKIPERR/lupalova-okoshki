@@ -2,7 +2,7 @@ import json
 import os
 import re
 
-from telegram_api import get_updates, send_message, send_photo, CHAT_ID
+from telegram_api import get_updates, send_message, send_document, CHAT_ID
 from render_okoshki import render
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -114,7 +114,7 @@ def main():
     services = [{"label": label, "masters": by_label[label]} for label in label_order]
 
     render(services, subtitle="на сегодня", out_path=OUT_PATH)
-    send_photo(OUT_PATH, caption="Свободные окошки на сегодня готовы. Можно публиковать в Stories.")
+    send_document(OUT_PATH, caption="Свободные окошки на сегодня готовы. Можно публиковать в Stories.")
     print("rendered and sent:", services)
 
 

@@ -24,6 +24,19 @@ def send_photo(path, caption="", chat_id=None):
     return r.json()
 
 
+def send_document(path, caption="", chat_id=None):
+    """Отправляет файл как документ — без пережатия/ресайза, в отличие от sendPhoto."""
+    with open(path, "rb") as f:
+        r = requests.post(
+            f"{API}/sendDocument",
+            data={"chat_id": chat_id or CHAT_ID, "caption": caption},
+            files={"document": f},
+            timeout=60,
+        )
+    r.raise_for_status()
+    return r.json()
+
+
 def get_updates(offset=0):
     r = requests.get(f"{API}/getUpdates", params={"offset": offset, "timeout": 0}, timeout=20)
     r.raise_for_status()
