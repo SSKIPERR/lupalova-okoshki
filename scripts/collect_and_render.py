@@ -61,15 +61,21 @@ def save_json(path, data):
 
 
 def parse_message(text):
-    """Возвращает список (master_key, [слоты]) найденных в сообщении."""
+    """Возвращает список (master_key, [слоты]) найденных в сообщении.
+
+    Если в одном сообщении упомянуто несколько мастеров (например,
+    администратор пишет за всех сразу), границей блока каждого мастера
+    служит СЛЕДУЮЩЕЕ найденное имя мастера — даже если между ними есть
+    посторонние слова ("и", "также" и т.п.), а не только если оно идёт
+    сразу следующим словом."""
     found = []
     matches = list(NAME_RE.finditer(text))
-    for i, m in enumerate(matches):
+    master_idx = [i for i, m in enumerate(matches) if m.group(0).lower() in MASTERS]
+    for pos, i in enumerate(master_idx):
+        m = matches[i]
         key = m.group(0).lower()
-        if key not in MASTERS:
-            continue
         start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) and matches[i + 1].group(0).lower() in MASTERS else len(text)
+        end = matches[master_idx[pos + 1]].start() if pos + 1 < len(master_idx) else len(text)
         segment = text[start:end]
         slots = TIME_RE.findall(segment)
         slots = [re.sub(r"\s*-\s*", " - ", s) for s in slots]
