@@ -6,8 +6,11 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
-def send_message(text, chat_id=None):
-    r = requests.post(f"{API}/sendMessage", data={"chat_id": chat_id or CHAT_ID, "text": text}, timeout=20)
+def send_message(text, chat_id=None, reply_to_message_id=None):
+    data = {"chat_id": chat_id or CHAT_ID, "text": text}
+    if reply_to_message_id:
+        data["reply_to_message_id"] = reply_to_message_id
+    r = requests.post(f"{API}/sendMessage", data=data, timeout=20)
     r.raise_for_status()
     return r.json()
 

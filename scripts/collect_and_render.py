@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 
 from telegram_api import get_updates, send_message, send_document, CHAT_ID
 from render_okoshki import render
@@ -9,6 +10,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(BASE, "..", "state")
 Q_STATE_PATH = os.path.join(STATE_DIR, "last_question.json")
 OFFSET_PATH = os.path.join(STATE_DIR, "offset.json")
+COLLECTED_PATH = os.path.join(STATE_DIR, "collected_today.json")
 OUT_PATH = os.path.join(BASE, "..", "okoshki.png")
 
 # мастер -> ярлык услуги (как в брифе)
@@ -30,6 +32,19 @@ DISPLAY_NAME = {
 
 TIME_RE = re.compile(r"\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?")
 NAME_RE = re.compile(r"[А-Яа-яёЁ]+")
+
+# команда, по которой можно попросить бота собрать окошки прямо сейчас,
+# не дожидаясь дефолтной отправки
+COMMAND_PREFIXES = ("/окошки",)
+
+# через сколько минут после вопроса бот сам присылает сторис, если её не попросили раньше командой
+AUTO_SEND_AFTER_MIN = 30
+
+NOT_UNDERSTOOD_TEXT = (
+    "Я не понял вас 🙈 Пожалуйста, напишите имя и свободное время для окошек "
+    "(например: Оля 12:00, 15:00). По возможности укажите и услугу мастера."
+)
+NOTHING_COLLECTED_TEXT = "Пока нет ответов на утренний вопрос про окошки — сторис не собрана."
 
 
 def load_json(path, default):
@@ -63,43 +78,18 @@ def parse_message(text):
     return found
 
 
-def main():
-    q_state = load_json(Q_STATE_PATH, None)
-    if not q_state:
-        print("Нет состояния вопроса (state/last_question.json) — пропускаю.")
-        return
-    since_ts = q_state["ts"]
+def is_command(text):
+    t = text.strip().lower()
+    return any(t.startswith(p) for p in COMMAND_PREFIXES)
 
-    off_state = load_json(OFFSET_PATH, {"offset": 0})
-    offset = off_state["offset"]
 
-    updates = get_updates(offset)
-    collected = {}  # master_key -> [слоты], последний ответ мастера побеждает
-    max_update_id = offset - 1
-
-    for upd in updates:
-        max_update_id = max(max_update_id, upd["update_id"])
-        msg = upd.get("message")
-        if not msg:
-            continue
-        if str(msg.get("chat", {}).get("id")) != str(CHAT_ID):
-            continue
-        if msg.get("date", 0) < since_ts:
-            continue
-        text = msg.get("text", "")
-        if not text:
-            continue
-        for key, slots in parse_message(text):
-            # последнее сообщение от мастера полностью заменяет предыдущее —
-            # так исправления ("нет, на самом деле...") учитываются корректно
-            collected[key] = slots
-
-    save_json(OFFSET_PATH, {"offset": max_update_id + 1})
-
+def render_and_send(collected):
+    """Рендерит и отправляет сторис, если есть данные; иначе шлёт уведомление.
+    Возвращает True, если реально отправлена картинка."""
     if not collected:
-        send_message("Пока нет ответов на утренний вопрос про окошки — сторис не собрана.")
-        print("no replies, nothing rendered")
-        return
+        send_message(NOTHING_COLLECTED_TEXT)
+        print("nothing collected, sent fallback text")
+        return False
 
     label_order = []
     by_label = {}
@@ -115,6 +105,77 @@ def main():
     render(services, subtitle="на сегодня", out_path=OUT_PATH)
     send_document(OUT_PATH, caption="Свободные окошки на сегодня готовы. Можно публиковать в Stories.")
     print("rendered and sent:", services)
+    return True
+
+
+def main():
+    q_state = load_json(Q_STATE_PATH, None)
+    if not q_state:
+        print("Вопрос сегодня ещё не отправлен (state/last_question.json) — пропускаю.")
+        return
+    since_ts = q_state["ts"]
+    question_mid = q_state.get("message_id")
+
+    coll_state = load_json(COLLECTED_PATH, None)
+    if not coll_state or coll_state.get("for_ts") != since_ts:
+        # новый день / новый вопрос — начинаем сбор с нуля
+        coll_state = {"for_ts": since_ts, "sent": False, "notified_empty": False, "data": {}}
+
+    off_state = load_json(OFFSET_PATH, {"offset": 0})
+    offset = off_state["offset"]
+
+    updates = get_updates(offset)
+    max_update_id = offset - 1
+    command_requested = False
+
+    for upd in updates:
+        max_update_id = max(max_update_id, upd["update_id"])
+        msg = upd.get("message")
+        if not msg:
+            continue
+        if str(msg.get("chat", {}).get("id")) != str(CHAT_ID):
+            continue
+        if msg.get("date", 0) < since_ts:
+            continue
+        text = msg.get("text", "")
+        if not text:
+            continue
+
+        if is_command(text):
+            command_requested = True
+            continue
+
+        matches = parse_message(text)
+        if matches:
+            for key, slots in matches:
+                # последнее сообщение от мастера полностью заменяет предыдущее —
+                # так исправления ("нет, на самом деле...") учитываются корректно
+                coll_state["data"][key] = slots
+        else:
+            reply_to = msg.get("reply_to_message")
+            if question_mid and reply_to and reply_to.get("message_id") == question_mid:
+                send_message(NOT_UNDERSTOOD_TEXT, reply_to_message_id=msg.get("message_id"))
+
+    save_json(OFFSET_PATH, {"offset": max_update_id + 1})
+
+    elapsed_min = (time.time() - since_ts) / 60
+    auto_due = (
+        not coll_state["sent"]
+        and not coll_state["notified_empty"]
+        and elapsed_min >= AUTO_SEND_AFTER_MIN
+    )
+
+    if command_requested:
+        # явная просьба — отвечаем всегда, даже если пока ничего не собрано
+        if render_and_send(coll_state["data"]):
+            coll_state["sent"] = True
+    elif auto_due:
+        if render_and_send(coll_state["data"]):
+            coll_state["sent"] = True
+        else:
+            coll_state["notified_empty"] = True
+
+    save_json(COLLECTED_PATH, coll_state)
 
 
 if __name__ == "__main__":

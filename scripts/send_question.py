@@ -13,8 +13,9 @@ STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sta
 
 
 def main():
-    send_message(MESSAGE_TEXT)
-    state = {"ts": time.time(), "chat_id": CHAT_ID}
+    resp = send_message(MESSAGE_TEXT)
+    message_id = resp.get("result", {}).get("message_id")
+    state = {"ts": time.time(), "chat_id": CHAT_ID, "message_id": message_id}
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
