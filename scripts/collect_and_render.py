@@ -33,9 +33,11 @@ DISPLAY_NAME = {
 TIME_RE = re.compile(r"\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?")
 NAME_RE = re.compile(r"[А-Яа-яёЁ]+")
 
-# команда, по которой можно попросить бота собрать окошки прямо сейчас,
-# не дожидаясь дефолтной отправки
-COMMAND_PREFIXES = ("/окошки",)
+# триггеры, по которым можно попросить бота собрать окошки прямо сейчас,
+# не дожидаясь автоотправки. Поддерживаем кириллицу, латиницу и слово без слэша,
+# потому что Telegram считает «настоящей командой» только латиницу (/okoshki),
+# а /окошки кириллицей — нет.
+COMMAND_PREFIXES = ("/окошки", "/okoshki", "окошки")
 
 # через сколько минут после вопроса бот сам присылает сторис, если её не попросили раньше командой
 AUTO_SEND_AFTER_MIN = 30
@@ -84,9 +86,24 @@ def parse_message(text):
     return found
 
 
-def is_command(text):
-    t = text.strip().lower()
-    return any(t.startswith(p) for p in COMMAND_PREFIXES)
+def parse_command(text):
+    """Если text начинается с триггера-команды — возвращает (True, остаток_после_команды),
+    иначе (False, text). Поддерживает '/окошки', '/okoshki', слово 'окошки',
+    вариант с @имя_бота и данные в том же сообщении ('/окошки Оля 12:00')."""
+    t = text.strip()
+    low = t.lower()
+    for p in COMMAND_PREFIXES:
+        if not low.startswith(p):
+            continue
+        after = t[len(p):]
+        # слово без слэша ('окошки') считаем командой только как отдельное слово,
+        # чтобы не реагировать на случайный текст вроде 'окошкина'
+        if not p.startswith("/") and after and not after[0].isspace() and after[0] != "@":
+            continue
+        # убрать возможный '@имя_бота' сразу после команды
+        after = re.sub(r"^@\S+\s*", "", after.lstrip())
+        return True, after.strip()
+    return False, t
 
 
 def render_and_send(collected):
@@ -147,15 +164,11 @@ def main():
         if not text:
             continue
 
-        if is_command(text):
+        is_cmd, remainder = parse_command(text)
+        if is_cmd:
             command_requested = True
             # после команды в том же сообщении могут быть указаны имена и время
             # (например: "/окошки Оля 12:00, 15:00") — разбираем и их
-            remainder = text.strip()
-            for prefix in COMMAND_PREFIXES:
-                if remainder.lower().startswith(prefix):
-                    remainder = remainder[len(prefix):].strip()
-                    break
             for key, slots in parse_message(remainder):
                 coll_state["data"][key] = slots
             continue
@@ -174,20 +187,21 @@ def main():
     save_json(OFFSET_PATH, {"offset": max_update_id + 1})
 
     elapsed_min = (time.time() - since_ts) / 60
-    auto_due = (
-        not coll_state["sent"]
-        and not coll_state["notified_empty"]
-        and elapsed_min >= AUTO_SEND_AFTER_MIN
-    )
 
     if command_requested:
         # явная просьба — отвечаем всегда, даже если пока ничего не собрано
         if render_and_send(coll_state["data"]):
             coll_state["sent"] = True
-    elif auto_due:
-        if render_and_send(coll_state["data"]):
-            coll_state["sent"] = True
-        else:
+    elif not coll_state["sent"] and elapsed_min >= AUTO_SEND_AFTER_MIN:
+        # прошло достаточно времени и сторис ещё не отправляли
+        if coll_state["data"]:
+            # есть ответы — собираем и шлём. Даже если раньше уже писали «нет ответов»:
+            # ответы могли прийти позже, и мы всё равно обязаны прислать картинку.
+            if render_and_send(coll_state["data"]):
+                coll_state["sent"] = True
+        elif not coll_state["notified_empty"]:
+            # ответов нет — один раз сообщаем об этом, но НЕ блокируем будущую отправку
+            send_message(NOTHING_COLLECTED_TEXT)
             coll_state["notified_empty"] = True
 
     save_json(COLLECTED_PATH, coll_state)
