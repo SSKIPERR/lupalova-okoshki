@@ -61,6 +61,8 @@ NOT_UNDERSTOOD_TEXT = (
     "(например: Оля 12:00, 15:00). По возможности укажите и услугу мастера."
 )
 NOTHING_COLLECTED_TEXT = "Пока нет ответов на утренний вопрос про окошки — сторис не собрана."
+# подтверждение, что бот принял команду и начал работу (чтобы не гадать, работает ли он)
+WORKING_TEXT = "Принял запрос 👍 Собираю свободные окошки, картинка будет через несколько секунд…"
 
 
 def load_json(path, default):
@@ -177,6 +179,7 @@ def main():
     updates = get_updates(offset)
     max_update_id = offset - 1
     command_requested = False
+    command_msg_id = None
 
     for upd in updates:
         max_update_id = max(max_update_id, upd["update_id"])
@@ -194,6 +197,7 @@ def main():
         is_cmd, remainder = parse_command(text)
         if is_cmd:
             command_requested = True
+            command_msg_id = msg.get("message_id")
             # после команды в том же сообщении могут быть указаны имена и время
             # (например: "/окошки Оля 12:00, 15:00") — разбираем и их
             for key, slots in parse_message(remainder):
@@ -216,6 +220,9 @@ def main():
     elapsed_min = (time.time() - since_ts) / 60
 
     if command_requested:
+        # сразу подтверждаем, что приняли запрос и начали работу — чтобы в группе
+        # не гадали, жив ли бот; картинку шлём следом
+        send_message(WORKING_TEXT, reply_to_message_id=command_msg_id)
         # явная просьба — отвечаем всегда, даже если пока ничего не собрано
         if render_and_send(coll_state["data"]):
             coll_state["sent"] = True
