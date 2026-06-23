@@ -1,6 +1,10 @@
 {
   "for_ts": 1782208563.4774768,
-  "sent": false,
+  "sent": true,
   "notified_empty": true,
-  "data": {}
+  "data": {
+    "оля": [
+      "16:00"
+    ]
+  }
 }
