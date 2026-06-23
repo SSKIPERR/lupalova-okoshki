@@ -1,11 +1,6 @@
 {
-  "for_ts": 1782156246.1606967,
-  "sent": true,
+  "for_ts": 1782208563.4774768,
+  "sent": false,
   "notified_empty": false,
-  "data": {
-    "оля": [
-      "12:00",
-      "15:00"
-    ]
-  }
+  "data": {}
 }
