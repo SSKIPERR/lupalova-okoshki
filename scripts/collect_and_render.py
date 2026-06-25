@@ -40,8 +40,8 @@ MASTERS = {
 }
 # каноничный ключ мастера -> имя для отображения на сторис
 DISPLAY_NAME = {
-    "вера": "Вера", "оля": "Оля", "яна": "Яна",
-    "ирина": "Ирина", "ксения": "Ксения", "галя": "Галя",
+    "вера": "Вера", "оля": "Ольга", "яна": "Яна",
+    "ирина": "Ирина", "ксения": "Ксения", "галя": "Галина",
 }
 
 TIME_RE = re.compile(r"\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?")
@@ -53,8 +53,9 @@ NAME_RE = re.compile(r"[А-Яа-яёЁ]+")
 # а /окошки кириллицей — нет.
 COMMAND_PREFIXES = ("/окошки", "/okoshki", "окошки")
 
-# через сколько минут после вопроса бот сам присылает сторис, если её не попросили раньше командой
-AUTO_SEND_AFTER_MIN = 30
+# через сколько минут «тишины» после последнего сообщения с окошками бот сам присылает
+# картинку (даём время дописать остальных мастеров). Команда «окошки» шлёт сразу, без ожидания.
+SETTLE_AFTER_MIN = 2
 
 NOT_UNDERSTOOD_TEXT = (
     "Я не понял вас 🙈 Пожалуйста, напишите имя и свободное время для окошек "
@@ -210,7 +211,7 @@ def main():
     coll_state = load_json(COLLECTED_PATH, None)
     if not coll_state or coll_state.get("for_ts") != since_ts:
         # новый день / новый вопрос — начинаем сбор с нуля
-        coll_state = {"for_ts": since_ts, "sent": False, "notified_empty": False, "data": {}}
+        coll_state = {"for_ts": since_ts, "sent": False, "data": {}, "last_change": None}
 
     off_state = load_json(OFFSET_PATH, {"offset": 0})
     offset = off_state["offset"]
@@ -219,6 +220,7 @@ def main():
     max_update_id = offset - 1
     command_requested = False
     command_msg_id = None
+    last_data_date = None  # дата последнего сообщения, изменившего список окошек (для «тишины»)
 
     for upd in updates:
         max_update_id = max(max_update_id, upd["update_id"])
@@ -256,6 +258,7 @@ def main():
             # удаление мастера из списка ("убрать Галя", "Галя нет")
             for key in removals:
                 coll_state["data"].pop(key, None)
+            last_data_date = max(last_data_date or 0, msg.get("date", 0))
         else:
             reply_to = msg.get("reply_to_message")
             if question_mid and reply_to and reply_to.get("message_id") == question_mid:
@@ -263,26 +266,22 @@ def main():
 
     save_json(OFFSET_PATH, {"offset": max_update_id + 1})
 
-    elapsed_min = (time.time() - since_ts) / 60
+    if last_data_date is not None:
+        coll_state["last_change"] = max(coll_state.get("last_change") or 0, last_data_date)
 
+    now = time.time()
     if command_requested:
-        # сразу подтверждаем, что приняли запрос и начали работу — чтобы в группе
-        # не гадали, жив ли бот; картинку шлём следом
+        # сразу подтверждаем приём — чтобы в группе не гадали, жив ли бот; картинку шлём следом
         send_message(WORKING_TEXT, reply_to_message_id=command_msg_id)
-        # явная просьба — отвечаем всегда, даже если пока ничего не собрано
         if render_and_send(coll_state["data"]):
             coll_state["sent"] = True
-    elif not coll_state["sent"] and elapsed_min >= AUTO_SEND_AFTER_MIN:
-        # прошло достаточно времени и сторис ещё не отправляли
-        if coll_state["data"]:
-            # есть ответы — собираем и шлём. Даже если раньше уже писали «нет ответов»:
-            # ответы могли прийти позже, и мы всё равно обязаны прислать картинку.
+    elif not coll_state["sent"] and coll_state["data"]:
+        # картинку отправляем сами, когда после последних окошек прошла «тишина»
+        # (вдруг кто-то ещё дописывает мастеров). 30-минутного таймера больше нет.
+        last_change = coll_state.get("last_change") or 0
+        if now - last_change >= SETTLE_AFTER_MIN * 60:
             if render_and_send(coll_state["data"]):
                 coll_state["sent"] = True
-        elif not coll_state["notified_empty"]:
-            # ответов нет — один раз сообщаем об этом, но НЕ блокируем будущую отправку
-            send_message(NOTHING_COLLECTED_TEXT)
-            coll_state["notified_empty"] = True
 
     save_json(COLLECTED_PATH, coll_state)
 

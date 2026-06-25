@@ -7,7 +7,8 @@ from telegram_api import send_message, CHAT_ID
 
 MESSAGE_TEXT = os.environ.get(
     "MORNING_MESSAGE",
-    "Доброе утро, жду свободные окошки на сегодня, пришлите имена + какая услуга",
+    "Доброе утро! Жду свободные окошки на сегодня — пришлите имя и время. "
+    "Отправляйте окошки одним сообщением, пожалуйста 🙏",
 )
 
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "state", "last_question.json")
