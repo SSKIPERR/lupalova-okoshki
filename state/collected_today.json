@@ -1,6 +1,12 @@
 {
   "for_ts": 1782294152.8085773,
-  "sent": false,
+  "sent": true,
   "notified_empty": true,
-  "data": {}
+  "data": {
+    "галя": [
+      "11:00",
+      "12:00",
+      "13:00"
+    ]
+  }
 }
