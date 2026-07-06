@@ -146,29 +146,58 @@ def render(services, subtitle="на сегодня", out_path="okoshki.png"):
 
     panel_margin_x = 84 * S
     panel_w = W - 2 * panel_margin_x
-    pad = 30 * S
-    inner_w = panel_w - 2 * pad
 
-    y = 700 * S
-    gap_between_panels = 34 * S
+    content_top = 700 * S
+    footer_top = H - 300 * S          # ниже этой линии — подвал; список туда залезать не должен
+    avail = footer_top - content_top  # доступная по высоте зона под список
     label_asc, label_desc = line_metrics(p_label)
-    master_asc, master_desc = line_metrics(p_master)
 
-    for svc in services:
-        master_blocks = []
-        h = pad
-        h += label_asc + label_desc
-        h += 26 * S
-        for mi, m in enumerate(svc["masters"]):
-            rows, cap_h, cap_gap = wrap_capsules(m["slots"], p_capsule, inner_w)
-            name_h = master_asc + master_desc
-            block_h = name_h + 16 * S + len(rows) * cap_h + max(0, len(rows) - 1) * (10 * S)
-            master_blocks.append((m, rows, cap_h, cap_gap, name_h))
-            h += block_h
-            if mi != len(svc["masters"]) - 1:
-                h += 30 * S
-        h += pad
+    def layout(scale):
+        """Считает раскладку списка при заданном масштабе.
+        Возвращает (общая_высота, план_панелей, шрифт_мастера, шрифт_капсул, отступы)."""
+        p_master = font_pair("600-normal", 36 * scale)
+        p_capsule = font_pair("400-normal", 30 * scale)
+        pad = 30 * S * scale
+        inner_w = panel_w - 2 * pad
+        master_asc, master_desc = line_metrics(p_master)
+        gaps = {
+            "pad": pad,
+            "label_gap": 26 * S * scale,
+            "name_gap": 16 * S * scale,
+            "row_gap": 10 * S * scale,
+            "master_gap": 30 * S * scale,
+            "panel_gap": 34 * S * scale,
+        }
+        cap_pad_x, cap_pad_y, cap_gap0 = 28 * scale, 10 * scale, 14 * scale
+        plan, total = [], 0.0
+        for si, svc in enumerate(services):
+            blocks = []
+            h = pad + (label_asc + label_desc) + gaps["label_gap"]
+            for mi, m in enumerate(svc["masters"]):
+                rows, cap_h, cgap = wrap_capsules(m["slots"], p_capsule, inner_w,
+                                                  pad_x=cap_pad_x, pad_y=cap_pad_y, gap=cap_gap0)
+                name_h = master_asc + master_desc
+                block_h = name_h + gaps["name_gap"] + len(rows) * cap_h + max(0, len(rows) - 1) * gaps["row_gap"]
+                blocks.append((m, rows, cap_h, cgap, name_h))
+                h += block_h
+                if mi != len(svc["masters"]) - 1:
+                    h += gaps["master_gap"]
+            h += pad
+            plan.append((svc, h, blocks))
+            total += h
+            if si != len(services) - 1:
+                total += gaps["panel_gap"]
+        return total, plan, p_master, p_capsule, gaps
 
+    # подбираем масштаб так, чтобы весь список гарантированно влез над подвалом
+    scale = 1.0
+    total, plan, p_master, p_capsule, gaps = layout(scale)
+    while total > avail and scale > 0.4:
+        scale = max(0.4, scale * 0.95)
+        total, plan, p_master, p_capsule, gaps = layout(scale)
+
+    y = content_top
+    for svc, h, blocks in plan:
         panel_top = y
         panel_layer = rounded_rect_rgba(
             (panel_w, h), radius=4 * S,
@@ -178,30 +207,33 @@ def render(services, subtitle="на сегодня", out_path="okoshki.png"):
         )
         img.paste(panel_layer, (int(panel_margin_x), int(panel_top)), panel_layer)
 
-        cursor_y = panel_top + pad
+        cursor_y = panel_top + gaps["pad"]
         draw_mixed(draw, (cx, cursor_y + label_asc / 2), svc["label"], p_label, GOLD, tracking=5)
-        cursor_y += label_asc + label_desc + 26 * S
+        cursor_y += label_asc + label_desc + gaps["label_gap"]
 
-        for m, rows, cap_h, cap_gap, name_h in master_blocks:
+        for mi, (m, rows, cap_h, cgap, name_h) in enumerate(blocks):
             draw_mixed(draw, (cx, cursor_y + name_h / 2), m["name"], p_master, DARK)
-            cursor_y += name_h + 16 * S
-            for row in rows:
-                row_w = sum(w for _, w in row) + cap_gap * (len(row) - 1)
+            cursor_y += name_h + gaps["name_gap"]
+            for ri, row in enumerate(rows):
+                row_w = sum(w for _, w in row) + cgap * (len(row) - 1)
                 rx = cx - row_w / 2
                 for text, w in row:
                     cap_layer = rounded_rect_rgba(
-                        (w, cap_h), radius=int(40 * S),
+                        (w, cap_h), radius=int(cap_h / 2),
                         fill=(CREAM[0], CREAM[1], CREAM[2], 255),
                         outline=(GOLD[0], GOLD[1], GOLD[2], 255),
                         width=max(1, int(1.5 * S)),
                     )
                     img.paste(cap_layer, (int(rx), int(cursor_y)), cap_layer)
                     draw_mixed(draw, (rx + w / 2, cursor_y + cap_h / 2), text, p_capsule, DARK)
-                    rx += w + cap_gap
-                cursor_y += cap_h + 10 * S
-            cursor_y += 20 * S
+                    rx += w + cgap
+                cursor_y += cap_h
+                if ri != len(rows) - 1:
+                    cursor_y += gaps["row_gap"]
+            if mi != len(blocks) - 1:
+                cursor_y += gaps["master_gap"]
 
-        y = panel_top + h + gap_between_panels
+        y = panel_top + h + gaps["panel_gap"]
 
     foot_divider_y = H - 270 * S
     divider(draw, cx, foot_divider_y)
