@@ -40,6 +40,8 @@ CANON = {
     "анна": "анна", "анну": "анна", "анне": "анна",
     "аня": "анна", "аню": "анна", "ане": "анна",
     "анечка": "анна", "анечку": "анна", "аннушка": "анна",
+    # Тахмина — стилист по волосам (стрижки/окрашивание)
+    "тахмина": "тахмина", "тахмину": "тахмина", "тахмине": "тахмина",
 }
 # каноничный ключ мастера -> ярлык услуги (как в брифе)
 MASTERS = {
@@ -49,13 +51,14 @@ MASTERS = {
     "ирина": "МАНИКЮР · ПЕДИКЮР",
     "ксения": "СТРИЖКИ · ОКРАШИВАНИЕ",
     "галя": "СТРИЖКИ · ОКРАШИВАНИЕ",
+    "тахмина": "СТРИЖКИ · ОКРАШИВАНИЕ",
     "анна": "СТИЛИСТ · ВИЗАЖ",
 }
 # каноничный ключ мастера -> имя для отображения на сторис
 DISPLAY_NAME = {
     "вера": "Вера", "оля": "Ольга", "яна": "Яна",
     "ирина": "Ирина", "ксения": "Ксения", "галя": "Галина",
-    "анна": "Анна",
+    "тахмина": "Тахмина", "анна": "Анна",
 }
 
 # время: ЧЧ:ММ или ЧЧ.ММ (мастера часто пишут через точку), с диапазоном через тире
@@ -215,6 +218,39 @@ def wants_clear(text):
     return False
 
 
+def _base(key):
+    """Каноничное имя мастера без суффикса-номера ('ирина#2' -> 'ирина')."""
+    return key.split("#", 1)[0]
+
+
+def _apply_masters(data, matches):
+    """Заносит распарсенных мастеров в data, ЗАМЕНЯЯ прежние записи тех же мастеров
+    (сообщение переопределяет их окошки). Если одно имя встречается в сообщении
+    несколько раз (например, две Ирины) — сохраняем как отдельные записи
+    ('ирина' и 'ирина#2'), обе показываются под своим именем."""
+    if not matches:
+        return
+    bases = {b for b, _ in matches}
+    for k in list(data.keys()):
+        if _base(k) in bases:
+            del data[k]
+    counts = {}
+    for base, slots in matches:
+        counts[base] = counts.get(base, 0) + 1
+        key = base if counts[base] == 1 else "{}#{}".format(base, counts[base])
+        data[key] = slots
+
+
+def _apply_removals(data, removals):
+    """Удаляет из data всех мастеров с указанными каноничными именами
+    (включая их дубли-номера)."""
+    if not removals:
+        return
+    for k in list(data.keys()):
+        if _base(k) in removals:
+            del data[k]
+
+
 def render_and_send(collected):
     """Рендерит и отправляет сторис, если есть данные; иначе шлёт уведомление.
     Возвращает True, если реально отправлена картинка."""
@@ -226,11 +262,11 @@ def render_and_send(collected):
     label_order = []
     by_label = {}
     for key, slots in collected.items():
-        label = MASTERS[key]
+        label = MASTERS[_base(key)]
         if label not in by_label:
             by_label[label] = []
             label_order.append(label)
-        by_label[label].append({"name": DISPLAY_NAME[key], "slots": slots})
+        by_label[label].append({"name": DISPLAY_NAME[_base(key)], "slots": slots})
 
     services = [{"label": label, "masters": by_label[label]} for label in label_order]
 
@@ -283,13 +319,10 @@ def main():
             # потом добавляем то, что в этом же сообщении
             if wants_clear(remainder):
                 coll_state["data"] = {}
-            # после команды в том же сообщении могут быть указаны имена и время
-            # (например: "/окошки Оля 12:00, 15:00") — разбираем и их
-            for key, slots in parse_message(remainder):
-                coll_state["data"][key] = slots
-            # ...и можно убрать мастера прямо в команде ("/окошки убрать Галя")
-            for key in parse_removals(remainder):
-                coll_state["data"].pop(key, None)
+            # после команды в том же сообщении могут быть имена и время
+            # ("/окошки Оля 12:00") — разбираем и их; можно и убрать ("/окошки убрать Галя")
+            _apply_masters(coll_state["data"], parse_message(remainder))
+            _apply_removals(coll_state["data"], parse_removals(remainder))
             continue
 
         cleared = wants_clear(text)
@@ -301,13 +334,10 @@ def main():
                 # собираем заново; раз список переделали, пришлём свежую картинку
                 coll_state["data"] = {}
                 coll_state["sent"] = False
-            for key, slots in matches:
-                # последнее сообщение от мастера полностью заменяет предыдущее —
-                # так исправления ("нет, на самом деле...") учитываются корректно
-                coll_state["data"][key] = slots
-            # удаление мастера из списка ("убрать Галя", "Галя нет")
-            for key in removals:
-                coll_state["data"].pop(key, None)
+            # заносим мастеров (сообщение заменяет их прежние окошки; две Ирины
+            # в одном сообщении сохраняются как две записи) и обрабатываем удаления
+            _apply_masters(coll_state["data"], matches)
+            _apply_removals(coll_state["data"], removals)
             last_data_date = max(last_data_date or 0, msg.get("date", 0))
         else:
             reply_to = msg.get("reply_to_message")
