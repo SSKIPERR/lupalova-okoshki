@@ -1,6 +1,11 @@
 {
   "for_ts": 1793512865.9178233,
   "sent": false,
-  "data": {},
-  "last_change": null
+  "data": {
+    "ирина": [
+      "18:00",
+      "19:30"
+    ]
+  },
+  "last_change": 1793531223
 }
